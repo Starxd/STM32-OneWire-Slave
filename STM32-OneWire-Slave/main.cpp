@@ -5,6 +5,8 @@
 #include <misc.h>
 #include <OneWireSlave.h>
 #include <Util.h>
+#include <core_cm3.h>
+
 
 extern "C" {
 	volatile void SysTick_Handler(void);
@@ -47,6 +49,11 @@ int main()
 	if (!InitSysClock())__asm("bkpt 255"); //error system clock
 	InitSysTickTimer();
 	OneWire.init(GPIOB, GPIO_Pin_0, EXTI_Line0);
+	
+	__asm("nop");
+
+	__asm("nop");
+	
 	
 	while (1)
 	{

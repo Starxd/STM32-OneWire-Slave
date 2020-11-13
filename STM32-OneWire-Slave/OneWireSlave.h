@@ -14,30 +14,37 @@ private:
 	EXTI_InitTypeDef EXTI_InitStruct;
 	NVIC_InitTypeDef NVIC_InitStruct;
 	GPIO_TypeDef* GPIO;
-	uint32_t downTime, upTime;
-	bool isPresence;
-	bool isReset, wasItReset;
-	bool statePin;
-	bool isDown, isUp;
-	bool isRecive;
-	uint8_t counterRecive;
-	uint32_t buff[255];
+	bool isMasterReleased;
+	bool isMasterReset;
+	bool isSearchRom;
+	uint8_t statePin;
+	uint8_t currentState;
 	uint32_t delay;
-	bool isWizardActivity;
-	uint8_t state;
 	uint8_t reciveCMD;
-	int8_t counterReciveCMD;
-	volatile bool isWriteBit;
-	bool isWizardSync;
+	uint8_t counterReciveCMD;
 	BitAction bitROM[64];
 	uint8_t counterBitWrite;
 	
+	uint8_t currentBitRom;
+	
+	volatile bool isMasterRead;
+	volatile bool isMasterWrite;
+	
+	bool reciveCmdIsComplite;
+	uint8_t searchRomState;
+	
+	
+	
 	uint8_t ROM[8] = { 0xC3, 0x00, 0x00, 0x01, 0x99, 0xB4, 0x53, 0x01 };
 	
-	inline void SET_PIN_MODE(GPIOMode_TypeDef GPIOMode);
+	inline void SET_PIN_MODE_IN();
+	inline void SET_PIN_MODE_OUT();
 	inline void SET_PIN_VALUE(BitAction bitVal);
 	inline void presence(void);
-	inline void write_bit(void);
+	inline uint8_t getByte(void);
+	inline void write_bit(bool bit);
+	inline void reset(void);
+	inline volatile void searchRom(void);
 
 public:
 	OneWireSlave();

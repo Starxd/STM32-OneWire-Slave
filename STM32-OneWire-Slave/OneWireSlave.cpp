@@ -19,9 +19,16 @@ void OneWireSlave::setROM() {
 	}
 }
 
-inline void OneWireSlave::SET_PIN_MODE(GPIOMode_TypeDef GPIOMode) {
-	this->GPIO_InitStructure.GPIO_Mode = GPIOMode;
-	GPIO_Init(this->GPIO, &this->GPIO_InitStructure);
+inline void OneWireSlave::SET_PIN_MODE_OUT()
+{
+	this->GPIO->CRL &= ~GPIO_CRL_CNF0;
+	//this->GPIO->CRL |= GPIO_CRL_CNF0_1;
+	this->GPIO->CRL |= GPIO_CRL_MODE0;
+}
+
+inline void OneWireSlave::SET_PIN_MODE_IN() {
+	this->GPIO->CRL &= ~(GPIO_CRL_CNF0 | GPIO_CRL_MODE0);
+	this->GPIO->CRL |= GPIO_CRL_CNF0_0;
 }
 inline void OneWireSlave::SET_PIN_VALUE(BitAction bitVal) {
 	GPIO_WriteBit(this->GPIO, this->GPIO_InitStructure.GPIO_Pin, bitVal);
@@ -39,11 +46,11 @@ void OneWireSlave::init(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin_x, uint32_t EXTI_
 	
 	this->GPIO = GPIOx;
 	this->GPIO_InitStructure.GPIO_Pin = GPIO_Pin_x;
-	this->GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
+	this->GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;
 	this->GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_Init(this->GPIO, &this->GPIO_InitStructure);
 	
-	OneWireSlave::SET_PIN_MODE(GPIO_Mode_IN_FLOATING);
+	SET_PIN_MODE_IN();
 	
 	this->NVIC_InitStruct.NVIC_IRQChannel = EXTI0_IRQn;
 	this->NVIC_InitStruct.NVIC_IRQChannelPreemptionPriority = 0x00;
@@ -68,105 +75,283 @@ void OneWireSlave::init(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin_x, uint32_t EXTI_
 	GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
 	this->setROM();
 }
-void OneWireSlave::interrupt() {
-	if (EXTI_GetITStatus(this->EXTI_InitStruct.EXTI_Line) != RESET) {
-		this->statePin = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_0);
-		if (this->isWriteBit) {
-			if (!this->statePin)this->isWizardSync = true;
-			GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
-		}
-		else
-		{
-			if (!this->statePin) {
-				reset_delay();
-				this->delay = 0;
-			}
-			else {
-				this->delay = get_delay();
-				this->isWizardActivity = true;
-			}
-		}
-		
-		EXTI_ClearITPendingBit(this->EXTI_InitStruct.EXTI_Line);
-	}
+void OneWireSlave::reset(void) {
+	this->currentState = 0;
+	this->counterReciveCMD = 0;
+	this->reciveCMD = 0;
+	this->counterBitWrite = 0;
+	this->isMasterRead = false;
+	this->isMasterReset = false;
+	this->isSearchRom = false;
+	currentBitRom = 0;
+	reciveCmdIsComplite = false;
 }
 
 inline void OneWireSlave::presence() {
 	this->EXTI_InitStruct.EXTI_LineCmd = DISABLE;
 	EXTI_Init(&EXTI_InitStruct);
-	SET_PIN_MODE(GPIO_Mode_Out_PP);
+	SET_PIN_MODE_OUT();
 	SET_PIN_VALUE(Bit_RESET);
 	delay_us(65);
-	SET_PIN_MODE(GPIO_Mode_IN_FLOATING);
+	SET_PIN_MODE_IN();
 	this->EXTI_InitStruct.EXTI_LineCmd = ENABLE;
 	EXTI_Init(&EXTI_InitStruct);
 }
 
-inline void OneWireSlave::write_bit()
+inline void OneWireSlave::write_bit(bool bit)
 {
-	this->EXTI_InitStruct.EXTI_LineCmd = DISABLE;
-	EXTI_Init(&EXTI_InitStruct);
-	SET_PIN_MODE(GPIO_Mode_Out_PP);
-	SET_PIN_VALUE(this->bitROM[this->counterBitWrite]);
-	delay_us(65);
-	SET_PIN_MODE(GPIO_Mode_IN_FLOATING);
-	this->EXTI_InitStruct.EXTI_LineCmd = ENABLE;
-	EXTI_Init(&EXTI_InitStruct);
-	this->counterBitWrite++;
-	GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
+	SET_PIN_VALUE((BitAction)bit);
+	SET_PIN_MODE_OUT();
+	delay_us(55);
+	SET_PIN_MODE_IN();
+}
+uint8_t OneWireSlave::getByte()
+{
+	
+}
+
+bool bit;
+bool readBit;
+uint8_t i;
+inline volatile void OneWireSlave::searchRom()
+{
+	GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
+	for (i = 0; i < 64; i++)
+	{
+		while (this->GPIO->IDR & GPIO_IDR_IDR0) ;
+		this->write_bit(bitROM[i]);
+
+		while(this->GPIO->IDR & GPIO_IDR_IDR0);
+		this->write_bit(!bitROM[i]);
+		
+		__asm("nop");
+		
+		while (this->GPIO->IDR & GPIO_IDR_IDR0) ;
+		delay_us(20);
+		readBit = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_0);
+		while (!(this->GPIO->IDR & GPIO_IDR_IDR0)) ;
+		
+		bit = (bool)bitROM[i];
+		if (!(readBit == bit))
+		{
+			this->currentState = 0;
+			GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
+			break;
+		}
+	}
+}
+
+void OneWireSlave::interrupt() {
+	if (EXTI_GetITStatus(this->EXTI_InitStruct.EXTI_Line) != RESET) {
+		this->isMasterReleased = true;
+		uint8_t pin = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_0);
+		if (!pin) 
+		{
+			reset_delay();
+		}
+		else 
+		{
+			uint32_t delay = get_delay();
+			if (delay > 400) this->isMasterReset = true;
+			else
+			{
+				bool reciveBit = ((get_delay() < 20) ? 1 : 0);
+				this->reciveCMD |= (reciveBit << this->counterReciveCMD);
+				if (this->counterReciveCMD < 7) this->counterReciveCMD++;
+				else if (this->reciveCMD == 0xF0) 
+				{
+					this->isSearchRom = true;
+				}
+			}
+		}
+
+		EXTI_ClearITPendingBit(this->EXTI_InitStruct.EXTI_Line);
+	}
 }
 
 uint8_t OneWireSlave::listener(void) {
-	switch (this->state)
+	if (this->isMasterReleased) 
 	{
-	case 0: //wait for reset
-		if (this->isWizardActivity)
-		{
-			this->isWizardActivity = false;
-			if ((delay > 200)&&(delay < 600))
-			{
-				OneWireSlave::presence();
-				this->counterReciveCMD = 7;
-				state = 1;
-			}
+		if (this->isMasterReset)
+		{	
+			this->reset();
+			this->presence();
+			this->currentState = 1;
+			GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
 		}
-		break;
-	case 1: // read cmd
-		if (this->isWizardActivity)
-		{
-			this->isWizardActivity = false;
-			this->reciveCMD |= (((this->delay < 20) ? 1 : 0) << this->counterReciveCMD);
-			if (this->counterReciveCMD > 0)this->counterReciveCMD--;
-			else 
-			{
-				this->state = 2;
-				counterReciveCMD = 0;
-			}
-		}
-		break;
-	case 2:
-		__asm("nop");
 		
-		switch (this->reciveCMD)
+		if (this->isSearchRom)
 		{
-		case 0x0F:
-			this->isWriteBit = true;
-			if (this->isWizardSync)
-			{
-				this->isWizardSync = false;
-				this->write_bit();
-				if (this->counterBitWrite > 63)
-				{
-					this->counterBitWrite = 0;
-					this->state = 0;
-					this->isWriteBit = false;
-				}
-			}
-			
-			break;
+			GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
 		}
-		break;
 	}
+	
+	
+//	if (this->isMasterReleased)
+//	{
+//		this->isMasterReleased = false;
+//		
+//		if (this->isMasterReset)
+//		{
+//			this->reset();
+//			this->presence();
+//			GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
+//		}
+//		else
+//		{
+//			bool reciveBit = (this->delay < 20) ? 1 : 0;
+//			switch (this->currentState)
+//			{
+//			case 0: //read cmd
+//				this->reciveCMD |= (reciveBit << this->counterReciveCMD);
+//				if (this->counterReciveCMD == 7)
+//				{
+//					if (this->reciveCMD == 0xF0) {
+//						this->currentState = 1;
+//					}
+//				}
+//				else this->counterReciveCMD++;
+//				break;
+//			case 1: //write pos
+//					this->write_bit(bitROM[currentBitRom]);
+//
+//				break;
+//				
+//			case 2: //write neg
+//				//GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
+//				SET_PIN_MODE_OUT();
+//				GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
+//				SET_PIN_VALUE((BitAction)!bitROM[currentBitRom]);
+//				delay_us(1);
+//				SET_PIN_MODE_IN();	
+//				this->currentState = 3;
+//				break;
+//				
+//			case 3: //read
+//				if (reciveBit && bitROM[currentBitRom]) {
+//					this->currentState = 1;
+//				}
+//				else
+//				{
+//					this->currentState = 90;
+//					isMasterRead = false;
+//				}
+//				break;
+//				
+//			default:
+//				isMasterRead = false;
+//				break;
+//			}
+			
+			
+			
+//			switch (this->currentState)
+//			{
+//			case 0: //get cmd
+//				this->reciveCMD |= (((this->delay < 20) ? 1 : 0) << this->counterReciveCMD);
+//				if (this->counterReciveCMD == 7)
+//				{
+//					if (this->reciveCMD == 0xF0) {
+//						//GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
+//						this->searchRom();
+//					}
+//				}
+//				else this->counterReciveCMD++;
+//				break;
+//								
+//			case 1:
+//				if (this->reciveCMD == 0xF0)
+//				{
+//					this->reset();
+//					this->searchRom();
+//				}
+//				break;
+//			}
+//		}
+		
+		
+//		if ((delay > 400)&&(delay < 600)) //this is reset
+//		{
+//			this->reset();
+//			this->presence();
+//		}
+//		else
+//		{
+//			switch (this->currentState)
+//			{
+//			case 0: //get cmd
+//				this->reciveCMD |= (((this->delay < 20) ? 1 : 0) << this->counterReciveCMD);
+//				if (this->counterReciveCMD == 7)
+//				{
+//					if (this->reciveCMD == 0xF0) {
+//						//GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
+//						this->searchRom();
+//					}
+//				}
+//				else this->counterReciveCMD++;
+//				break;
+//				
+//			case 1:
+//				if (this->reciveCMD == 0xF0)
+//				{
+//					this->reset();
+//					this->searchRom();
+//				}
+//				break;
+//			}
+//		}
+//	}
+	
+//	switch (this->state)
+//	{
+//	case 0: //wait for reset
+//		if (this->isWizardActivity)
+//		{
+//			this->isWizardActivity = false;
+//			if ((delay > 200)&&(delay < 600))
+//			{
+//				OneWireSlave::presence();
+//				this->counterReciveCMD = 7;
+//				state = 1;
+//			}
+//		}
+//		break;
+//	case 1: // read cmd
+//		if (this->isWizardActivity)
+//		{
+//			this->isWizardActivity = false;
+//			this->reciveCMD |= (((this->delay < 20) ? 1 : 0) << this->counterReciveCMD);
+//			if (this->counterReciveCMD > 0)this->counterReciveCMD--;
+//			else 
+//			{
+//				this->state = 2;
+//				counterReciveCMD = 0;
+//			}
+//		}
+//		break;
+//	case 2:
+//		__asm("nop");
+//		
+//		switch (this->reciveCMD)
+//		{
+//		case 0x0F:
+//			this->isWriteBit = true;
+//			if (this->isWizardSync)
+//			{
+//				this->isWizardSync = false;
+//				this->write_bit();
+//				if (this->counterBitWrite > 63)
+//				{
+//					this->counterBitWrite = 0;
+//					this->state = 0;
+//					this->isWriteBit = false;
+//				}
+//			}
+//			
+//			break;
+//		}
+//		break;
+//	}
 	
 	return 0;
 }

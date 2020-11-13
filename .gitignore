@@ -338,3 +338,4 @@ ASALocalRun/
 
 # BeatPulse healthcheck temp database
 healthchecksdb
+/STM32-OneWire-Slave/.visualgdb/CodeDB/STM32-OneWire-Slave-Debug-VisualGDB
