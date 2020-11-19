@@ -49,6 +49,8 @@ int main()
 	if (!InitSysClock())__asm("bkpt 255"); //error system clock
 	InitSysTickTimer();
 	OneWire.init(GPIOB, GPIO_Pin_0, EXTI_Line0);
+	OneWire.setROM(new uint8_t[6] { 0x28, 0xB4, 0x99, 0x01, 0x00, 0x00 });
+	OneWire.setIsEnable(true);
 	
 	__asm("nop");
 

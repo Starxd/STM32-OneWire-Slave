@@ -6,17 +6,35 @@ OneWireSlave::OneWireSlave() {
 OneWireSlave::~OneWireSlave() {
 	
 }
-
-void OneWireSlave::setROM() {
-	uint8_t cnt = 0;
-	for (uint8_t i = 0; i < 8; i++)
+inline uint8_t OneWireSlave::calculateCRC8(uint8_t seed, uint8_t inData)
+{
+	uint8_t bitsLeft = 0;
+	uint8_t tempp = 0;
+	for (bitsLeft = 8; bitsLeft > 0; bitsLeft--)
 	{
-		for (uint8_t bit = 1; bit; bit <<= 1)
+		tempp = ((seed ^ inData) & 0x01);
+		if (tempp == 0) seed >>= 1;
+		else
 		{
-			this->bitROM[cnt] = (bit & this->ROM[i]) ? Bit_SET : Bit_RESET;
-			cnt++;
+			seed ^= 0x18;
+			seed >>= 1;
+			seed |= 0x80;
 		}
+		inData >>= 1;
 	}
+	return seed;
+}
+
+void OneWireSlave::setROM(uint8_t rom[6]) {
+	uint8_t cnt = 0;
+	this->ROM[0] = 0x01;
+	uint8_t crc = calculateCRC8(0, this->ROM[0]);
+	for (uint8_t i = 1; i < 7; i++)
+	{
+		this->ROM[i] = rom[i - 1];
+		crc = calculateCRC8(crc, this->ROM[i]);
+	}
+	ROM[7] = crc;
 }
 
 inline void OneWireSlave::SET_PIN_MODE_OUT()
@@ -30,8 +48,8 @@ inline void OneWireSlave::SET_PIN_MODE_IN() {
 	this->GPIO->CRL &= ~(GPIO_CRL_CNF0 | GPIO_CRL_MODE0);
 	this->GPIO->CRL |= GPIO_CRL_CNF0_0;
 }
-inline void OneWireSlave::SET_PIN_VALUE(BitAction bitVal) {
-	GPIO_WriteBit(this->GPIO, this->GPIO_InitStructure.GPIO_Pin, bitVal);
+inline void OneWireSlave::SET_PIN_VALUE(bool bitVal) {
+	GPIO_WriteBit(this->GPIO, this->GPIO_InitStructure.GPIO_Pin, (BitAction)bitVal);
 }
 
 void OneWireSlave::init(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin_x, uint32_t EXTI_Line) {
@@ -73,26 +91,26 @@ void OneWireSlave::init(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin_x, uint32_t EXTI_
 	GPIO_InitStructureTX.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_Init(GPIOA, &GPIO_InitStructureTX);
 	GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
-	this->setROM();
 }
 void OneWireSlave::reset(void) {
-	this->currentState = 0;
 	this->counterReciveCMD = 0;
 	this->reciveCMD = 0;
 	this->counterBitWrite = 0;
 	this->isMasterReset = false;
 	this->isSearchRom = false;
-	currentBitRom = 0;
-	reciveCmdIsComplite = false;
 	this->searchRomState = 0;
 	this->isCmdReceive = false;
+}
+void OneWireSlave::setIsEnable(bool isEnable)
+{
+	this->isEnable = isEnable;
 }
 
 inline void OneWireSlave::presence() {
 	this->EXTI_InitStruct.EXTI_LineCmd = DISABLE;
 	EXTI_Init(&EXTI_InitStruct);
 	SET_PIN_MODE_OUT();
-	SET_PIN_VALUE(Bit_RESET);
+	SET_PIN_VALUE(false);
 	delay_us(65);
 	SET_PIN_MODE_IN();
 	this->EXTI_InitStruct.EXTI_LineCmd = ENABLE;
@@ -103,142 +121,106 @@ inline void OneWireSlave::write_bit(bool bit)
 {
 	this->NVIC_InitStruct.NVIC_IRQChannelCmd = DISABLE;
 	NVIC_Init(&NVIC_InitStruct);
-	if (!bit) {
-		SET_PIN_VALUE((BitAction)bit);
-		SET_PIN_MODE_OUT();
-		delay_us(20);
-		SET_PIN_MODE_IN();
-	}
-	this->NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
-	NVIC_Init(&NVIC_InitStruct);
-}
-inline uint8_t OneWireSlave::read_bit() 
-{
-	while (this->GPIO->IDR & GPIO_IDR_IDR0); //wait begin timeslot
-	delay_us(10); //delay for stable line
-}
-uint8_t OneWireSlave::getByte()
-{
-	
-}
-
-bool bit;
-bool readBit;
-uint8_t i;
-inline volatile void OneWireSlave::searchRom()
-{
-	GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
-	for (i = 0; i < 64; i++)
+	if (!bit)
 	{
-		while (this->GPIO->IDR & GPIO_IDR_IDR0) ;
-		this->write_bit(bitROM[i]);
-
-		while(this->GPIO->IDR & GPIO_IDR_IDR0);
-		this->write_bit(!bitROM[i]);
-		
-		__asm("nop");
-		
-		while (this->GPIO->IDR & GPIO_IDR_IDR0) ;
-		delay_us(20);
-		readBit = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_0);
-		while (!(this->GPIO->IDR & GPIO_IDR_IDR0)) ;
-		
-		bit = (bool)bitROM[i];
-		if (!(readBit == bit))
-		{
-			this->currentState = 0;
-			GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
-			break;
-		}
+		SET_PIN_VALUE(bit);
+		SET_PIN_MODE_OUT();
 	}
 }
+
 
 void OneWireSlave::interrupt() {
 	if (EXTI_GetITStatus(this->EXTI_InitStruct.EXTI_Line) != RESET) {
-		this->statePin = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_0);
-		if (!this->statePin) 
+		if (this->isEnable)
 		{
-			reset_delay();
-			if (this->isMasterRead) this->isStartTimeSlot = true;
-		}
-		else 
-		{
-			this->delay = get_delay();
-			if (this->delay > 400) this->isMasterReset = true;
-			else
+			bool statePin = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_0);
+			if (!statePin) 
 			{
-				bool reciveBit = ((this->delay < 20) ? 1 : 0);
-				
-				if (this->isCmdReceive)
+				reset_delay();
+				if (this->isMasterRead) 
 				{
-					if (!this->isMasterRead)
+					if (this->isCmdReceive)
 					{
-						if (reciveBit == this->bitROM[this->counterBitWrite])
+						this->isWriteBit = true;
+						uint8_t bytePosition = this->counterBitWrite / 8;
+						uint8_t bitPosition = this->counterBitWrite % 8;
+						bool sendBit = bool((1 << bitPosition)  &  this->ROM[bytePosition]);		
+					
+						switch (this->searchRomState)
 						{
-							this->counterBitWrite++;
-							this->isMasterRead = true;
-							GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
-							__asm("nop");
-							GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);	
+						case 0:
+							this->write_bit(sendBit);
+							break;
+						case 1:
+							this->write_bit(!sendBit);
+							break;
 						}
 					}
 				}
+			}
+			else 
+			{
+				uint32_t delay = get_delay();
+				if (delay > 400) this->isMasterReset = true;
 				else
 				{
-					this->reciveCMD |= (reciveBit << this->counterReciveCMD);
-					if (this->counterReciveCMD < 7) this->counterReciveCMD++;
-					else if (this->reciveCMD == 0xF0) 
+					bool reciveBit = ((delay < 20) ? 1 : 0);
+				
+					if (this->isCmdReceive)
 					{
-						this->isCmdReceive = true;
-						this->isMasterRead = true;
+						if (!this->isMasterRead)
+						{
+							uint8_t bytePosition = this->counterBitWrite / 8;
+							uint8_t bitPosition = this->counterBitWrite % 8;
+							bool sendBit = ((1 << bitPosition)  &  this->ROM[bytePosition]);
+							if (reciveBit == sendBit)
+							{
+								this->counterBitWrite++;
+								this->isMasterRead = true;
+							}
+						}
+					}
+					else
+					{
+						this->reciveCMD |= (reciveBit << this->counterReciveCMD);
+						if (this->counterReciveCMD < 7) this->counterReciveCMD++;
+						else if (this->reciveCMD == 0xF0) 
+						{
+							this->isCmdReceive = true;
+							this->isMasterRead = true;
+						}
 					}
 				}
 			}
 		}
-
 		EXTI_ClearITPendingBit(this->EXTI_InitStruct.EXTI_Line);
 	}
 }
 
-bool reciveBit;
 uint8_t OneWireSlave::listener(void) {
 	if (this->isMasterReset)
 	{	
 		this->reset();
-		//GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
-		this->presence();
-		//GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);	
+		if(this->isEnable) this->presence();
 	}
-	
-	if (this->isStartTimeSlot) 
+	if (this->isWriteBit)
 	{
-		this->isStartTimeSlot = false;
-		if (this->isCmdReceive)
+		this->isWriteBit = false;
+		delay_us(20);
+		SET_PIN_MODE_IN();
+		this->NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
+		NVIC_Init(&NVIC_InitStruct);
+		if (searchRomState == 1)
 		{
-			switch (this->searchRomState)
-			{
-			case 0:
-				if (!this->statePin) 
-				{
-					//GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
-					this->write_bit(this->bitROM[this->counterBitWrite]);
-					searchRomState = 1;
-					//GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
-				}
-				break;
-			case 1:
-				if (!this->statePin) 
-				{
-					//GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
-					this->write_bit(!this->bitROM[this->counterBitWrite]);
-					searchRomState = 0;
-					this->isMasterRead = false;
-					//GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
-				}
-				break;
-			}
+			GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
+			searchRomState = 0;
+			this->isMasterRead = false;
+			GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
+		}
+		else
+		{
+			searchRomState = 1;
 		}
 	}
-	
 	return 0;
 }
