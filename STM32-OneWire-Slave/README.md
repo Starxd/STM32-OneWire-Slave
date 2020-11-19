@@ -1,3 +1,11 @@
+# STM32 OneWire slave
+
+
+Usage
+-----
+
+Example:
+```c++
 #define F_CPU 72000000UL
 #include <stm32f10x_gpio.h>
 #include <stm32f10x_rcc.h>
@@ -6,7 +14,6 @@
 #include <OneWireSlave.h>
 #include <Util.h>
 #include <core_cm3.h>
-
 
 extern "C" {
 	volatile void SysTick_Handler(void);
@@ -54,10 +61,7 @@ int main()
 
 	while (1)
 	{
-		if (OneWire.listener())
-		{
-			__asm("nop");
-		}
+		OneWire.listener()
 	}
 }
 
@@ -68,3 +72,35 @@ volatile void SysTick_Handler(void) {
 void EXTI0_IRQHandler(void) {
 	OneWire.interrupt();
 }
+
+```
+
+Start Inverted JSON:
+```
+version: '3.7'
+
+services:
+  ijson:
+    image: lega911/ijson
+    container_name: base-ijson
+    ports:
+      - 8001:8001
+```
+
+Send POST request directly to: http://localhost:8001
+```bash
+curl http://127.0.0.1:8001/my-microservice -d '{"id": 1, "params":{"test":1}}'
+```
+
+**If you run [gateway](https://github.com/kakadu-dev/nodejs-ijson-microservices).** Run POST request to: http://localhost:3000
+```json
+{
+  "id": 1,
+  "method": "my-service.test-method",
+  "params": {
+    "test": 1
+  }
+}
+```
+
+That's all. Check it.

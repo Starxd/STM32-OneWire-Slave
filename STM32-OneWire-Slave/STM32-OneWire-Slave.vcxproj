@@ -61,6 +61,7 @@
     <ClCompile Include="Util.cpp" />
     <ClInclude Include="OneWireSlave.h" />
     <ClInclude Include="Util.h" />
+    <None Include="README.md" />
     <None Include="stm32.props" />
     <ClCompile Include="$(BSP_ROOT)\STM32F1xxxx\StartupFiles\startup_stm32f103xb.c" />
     <ClCompile Include="$(BSP_ROOT)\STM32F1xxxx\STM32F10x_StdPeriph_Driver\src\misc.c" />
