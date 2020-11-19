@@ -49,7 +49,8 @@ void InitSysTickTimer(void) {
 	SysTick->LOAD = F_CPU / 1000000 - 1;
 	SysTick->VAL = F_CPU / 1000000 - 1;
 	SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk 
-		| SysTick_CTRL_TICKINT_Msk   | SysTick_CTRL_ENABLE_Msk;
+		| SysTick_CTRL_TICKINT_Msk   
+		| SysTick_CTRL_ENABLE_Msk;
 }
 
 int main()
