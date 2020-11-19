@@ -19,7 +19,7 @@ private:
 	volatile bool isWriteBit;
 	volatile bool isMasterReset;
 	volatile bool isSearchRom;
-	volatile bool isEnable;
+	volatile bool isEnable = false;
 	uint8_t reciveCMD;
 	uint8_t counterReciveCMD;
 	uint8_t counterBitWrite;
