@@ -75,32 +75,4 @@ void EXTI0_IRQHandler(void) {
 
 ```
 
-Start Inverted JSON:
-```
-version: '3.7'
-
-services:
-  ijson:
-    image: lega911/ijson
-    container_name: base-ijson
-    ports:
-      - 8001:8001
-```
-
-Send POST request directly to: http://localhost:8001
-```bash
-curl http://127.0.0.1:8001/my-microservice -d '{"id": 1, "params":{"test":1}}'
-```
-
-**If you run [gateway](https://github.com/kakadu-dev/nodejs-ijson-microservices).** Run POST request to: http://localhost:3000
-```json
-{
-  "id": 1,
-  "method": "my-service.test-method",
-  "params": {
-    "test": 1
-  }
-}
-```
-
 That's all. Check it.
