@@ -9,11 +9,18 @@
 
 class OneWireSlave
 {
+	struct GPIO_REG
+	{
+		uint32_t _GPIO_CNF;
+		uint32_t _GPIO_MODE;
+		uint32_t _GPIO_CNF_0;
+	};
 private:
 	GPIO_InitTypeDef GPIO_InitStructure;
 	EXTI_InitTypeDef EXTI_InitStruct;
 	NVIC_InitTypeDef NVIC_InitStruct;
 	GPIO_TypeDef* GPIO;
+	GPIO_REG regGPIO;
 	volatile bool isCmdReceive;
 	volatile bool isMasterRead;
 	volatile bool isWriteBit;
@@ -25,8 +32,10 @@ private:
 	uint8_t counterBitWrite;
 	uint8_t searchRomState;
 	uint8_t ROM[8];
+	uint8_t portSource;
+	uint8_t pinSource;
 
-	
+	inline uint8_t getPinNumber(uint16_t pin);
 	inline void SET_PIN_MODE_IN();
 	inline void SET_PIN_MODE_OUT();
 	inline void SET_PIN_VALUE(bool bitVal);

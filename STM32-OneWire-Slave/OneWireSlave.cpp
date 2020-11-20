@@ -6,6 +6,17 @@ OneWireSlave::OneWireSlave() {
 OneWireSlave::~OneWireSlave() {
 	
 }
+inline uint8_t OneWireSlave::getPinNumber(uint16_t pin)
+{
+	pin -= 1;
+	pin = pin - ((pin >> 1) & 0x55555555);
+	pin = (pin & 0x33333333) + ((pin >> 2) & 0x33333333);
+	pin = (pin + (pin >> 4)) & 0x0F0F0F0F;
+	pin = pin + (pin >> 8);
+	pin = pin + (pin >> 16);
+	pin &= 0x0000003F;
+	return pin;
+}
 inline uint8_t OneWireSlave::calculateCRC8(uint8_t seed, uint8_t inData)
 {
 	uint8_t bitsLeft = 0;
@@ -39,14 +50,29 @@ void OneWireSlave::setROM(uint8_t rom[6]) {
 
 inline void OneWireSlave::SET_PIN_MODE_OUT()
 {
-	this->GPIO->CRL &= ~GPIO_CRL_CNF0;
-	//this->GPIO->CRL |= GPIO_CRL_CNF0_1;
-	this->GPIO->CRL |= GPIO_CRL_MODE0;
+	if (this->GPIO_InitStructure.GPIO_Pin < GPIO_Pin_8)
+	{
+		this->GPIO->CRL &= ~regGPIO._GPIO_CNF;
+		this->GPIO->CRL |= regGPIO._GPIO_MODE;
+	}
+	else
+	{
+		this->GPIO->CRH &= ~regGPIO._GPIO_CNF;
+		this->GPIO->CRH |= regGPIO._GPIO_MODE;
+	}
 }
 
 inline void OneWireSlave::SET_PIN_MODE_IN() {
-	this->GPIO->CRL &= ~(GPIO_CRL_CNF0 | GPIO_CRL_MODE0);
-	this->GPIO->CRL |= GPIO_CRL_CNF0_0;
+	if (this->GPIO_InitStructure.GPIO_Pin < GPIO_Pin_8)
+	{
+		this->GPIO->CRL &= ~(regGPIO._GPIO_CNF | regGPIO._GPIO_MODE);
+		this->GPIO->CRL |= regGPIO._GPIO_CNF_0;
+	}
+	else
+	{
+		this->GPIO->CRH &= ~(regGPIO._GPIO_CNF | regGPIO._GPIO_MODE);
+		this->GPIO->CRH |= regGPIO._GPIO_CNF_0;
+	}
 }
 inline void OneWireSlave::SET_PIN_VALUE(bool bitVal) {
 	GPIO_WriteBit(this->GPIO, this->GPIO_InitStructure.GPIO_Pin, (BitAction)bitVal);
@@ -55,12 +81,39 @@ inline void OneWireSlave::SET_PIN_VALUE(bool bitVal) {
 void OneWireSlave::init(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin_x, uint32_t EXTI_Line) {
 	/* Check the parameters */
 	assert_param(IS_GPIO_ALL_PERIPH(GPIOx));
-	if (GPIOx == GPIOA)RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
-	if (GPIOx == GPIOB)RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
-	if (GPIOx == GPIOC)RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
-	if (GPIOx == GPIOD)RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOD, ENABLE);
-	if (GPIOx == GPIOE)RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOE, ENABLE);
+	if (GPIOx == GPIOA)
+	{
+		RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
+		this->portSource = GPIO_PortSourceGPIOA;
+	}
+	if (GPIOx == GPIOB)
+	{
+		RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
+		this->portSource = GPIO_PortSourceGPIOB;
+	}
+	if (GPIOx == GPIOC)
+	{
+		RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
+		this->portSource = GPIO_PortSourceGPIOC;
+	}
+	if (GPIOx == GPIOD)
+	{
+		RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOD, ENABLE);
+		this->portSource = GPIO_PortSourceGPIOD;
+		
+	}
+	if (GPIOx == GPIOE)
+	{
+		RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOE, ENABLE);
+		this->portSource = GPIO_PortSourceGPIOE;
+	}
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+	
+	this->pinSource = getPinNumber(GPIO_Pin_x);
+	uint8_t lsh = 4 * pinSource;
+	this->regGPIO._GPIO_CNF =  GPIO_CRL_CNF0 << lsh;
+	this->regGPIO._GPIO_CNF_0 = GPIO_CRL_CNF0_0 << lsh;
+	this->regGPIO._GPIO_MODE =  GPIO_CRL_MODE0 << lsh;
 	
 	this->GPIO = GPIOx;
 	this->GPIO_InitStructure.GPIO_Pin = GPIO_Pin_x;
@@ -76,21 +129,12 @@ void OneWireSlave::init(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin_x, uint32_t EXTI_
 	this->NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
 	NVIC_Init(&NVIC_InitStruct);
 	
-	GPIO_EXTILineConfig(GPIO_PortSourceGPIOB, GPIO_PinSource0);
+	GPIO_EXTILineConfig(this->portSource, this->pinSource);
 	this->EXTI_InitStruct.EXTI_Line = EXTI_Line;
 	this->EXTI_InitStruct.EXTI_LineCmd = ENABLE;
 	this->EXTI_InitStruct.EXTI_Mode = EXTI_Mode_Interrupt;
 	this->EXTI_InitStruct.EXTI_Trigger = EXTI_Trigger_Rising_Falling;
 	EXTI_Init(&EXTI_InitStruct);
-	
-	//////
-	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
-	GPIO_InitTypeDef GPIO_InitStructureTX;
-	GPIO_InitStructureTX.GPIO_Pin = GPIO_Pin_9;
-	GPIO_InitStructureTX.GPIO_Mode = GPIO_Mode_Out_PP;
-	GPIO_InitStructureTX.GPIO_Speed = GPIO_Speed_50MHz;
-	GPIO_Init(GPIOA, &GPIO_InitStructureTX);
-	GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
 }
 void OneWireSlave::reset(void) {
 	this->counterReciveCMD = 0;
@@ -133,7 +177,7 @@ void OneWireSlave::interrupt() {
 	if (EXTI_GetITStatus(this->EXTI_InitStruct.EXTI_Line) != RESET) {
 		if (this->isEnable)
 		{
-			bool statePin = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_0);
+			bool statePin = GPIO_ReadInputDataBit(this->GPIO, this->GPIO_InitStructure.GPIO_Pin);
 			if (!statePin) 
 			{
 				reset_delay();
@@ -212,10 +256,8 @@ uint8_t OneWireSlave::listener(void) {
 		NVIC_Init(&NVIC_InitStruct);
 		if (searchRomState == 1)
 		{
-			GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_RESET);
 			searchRomState = 0;
 			this->isMasterRead = false;
-			GPIO_WriteBit(GPIOA, GPIO_Pin_9, Bit_SET);
 		}
 		else
 		{
