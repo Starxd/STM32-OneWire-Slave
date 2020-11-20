@@ -5,7 +5,6 @@
 #include <misc.h>
 #include <OneWireSlave.h>
 #include <Util.h>
-#include <core_cm3.h>
 
 
 extern "C" {
